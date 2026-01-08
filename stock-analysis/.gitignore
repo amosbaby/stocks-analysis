@@ -1,0 +1,6 @@
+# 环境与配置（避免线上配置被覆盖）
+config/*.json
+data/*.json
+
+# 构建产物
+preact-terminal/dist
