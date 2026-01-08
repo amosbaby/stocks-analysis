@@ -142,7 +142,7 @@ def clean_old_cache():
  
 class AdvancedStockAnalyzer:
     SECTOR_THEMES = [
-        '大新能源', '科技/半导体', '大消费', '大农业', '医疗健康', '大金融',
+        '大新能源', '半导体','人工智能' ,'软件','消费电子','有色金属','芯片','机器人','国防军工','脑机接口','云计算', '大消费', '大农业', '医疗健康', '大金融',
         '房地产', '港股', '周期/材料', '高端制造', '交通运输', '传媒/游戏',
         '军工', '其他'
     ]
@@ -441,9 +441,23 @@ class AdvancedStockAnalyzer:
             industry_flow = pd.merge(industry_flow, ljqs_counts, left_on='板块名称', right_on='精确行业', how='left')
             industry_flow['量价齐升家数'].fillna(0, inplace=True)
         else: industry_flow['量价齐升家数'] = 0
-        if '主力净流入' not in industry_flow.columns: industry_flow['资金强度分'] = 0
-        else: industry_flow['资金强度分'] = industry_flow['主力净流入'].rank(pct=True) * 100
+
+        # --- 数据清洗与稳健打分：避免 akshare 返回全 NaN/占位符导致 rank 输出 NaN ---
+        industry_flow['量价齐升家数'] = pd.to_numeric(industry_flow.get('量价齐升家数', 0), errors='coerce').fillna(0)
+
+        if '主力净流入' in industry_flow.columns:
+            fund_net = pd.to_numeric(industry_flow['主力净流入'], errors='coerce')
+            # akshare 有时会返回整列 NaN（接口字段仍在但数据缺失），此时给一个中性分，避免热力值全是 NaN
+            if fund_net.notna().any():
+                industry_flow['资金强度分'] = fund_net.rank(pct=True) * 100
+            else:
+                industry_flow['资金强度分'] = 50.0
+        else:
+            industry_flow['资金强度分'] = 50.0
+
+        # 人气分：全为 0 时 rank 也会给出中位数百分比，不会 NaN
         industry_flow['人气强度分'] = industry_flow['量价齐升家数'].rank(pct=True) * 100
+
         industry_flow['热力值'] = (0.7 * industry_flow['人气强度分'] + 0.3 * industry_flow['资金强度分']).round(2)
         self.analysis_result['sector_heat_map'] = industry_flow.sort_values(by='热力值', ascending=False)
         print("板块相对强弱度分析完成。")
@@ -660,8 +674,13 @@ class AdvancedStockAnalyzer:
 - 潜在机会ETF(含实时价格): {', '.join(opportunities)}
 """
             content_string = chat_volces(system=system_prompt, user=user_prompt)
-            # [V21.0] 直接展示AI的原始内容，不做解析
-            self.analysis_result['conclusion_raw'] = content_string
+            # [V21.0] 直接展示AI的原始内容，不做解析；但要避免把底层异常(如 401)直接当作“观点”
+            if isinstance(content_string, str) and (
+                content_string.startswith("AI调用失败") or content_string.startswith("AI调用未配置")
+            ):
+                self.analysis_result['conclusion_raw'] = content_string
+            else:
+                self.analysis_result['conclusion_raw'] = content_string
             print("AI动态复盘与决策建议生成完毕。")
         except Exception as e:
             print(f"  - AI动态复盘失败: {e}")
