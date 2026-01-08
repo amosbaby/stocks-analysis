@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 
 try:
@@ -230,6 +231,15 @@ def read_report(date_str: Optional[str] = None) -> Dict[str, Any]:
 
 
 app = FastAPI(title="A-Share Risk Backend", version="1.0.0")
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 scheduler = AsyncIOScheduler() if AsyncIOScheduler else None
 
 
@@ -285,6 +295,7 @@ async def update_config(payload: ConfigPayload) -> Dict[str, Any]:
 
 
 @app.post("/run")
+@app.post("/api/run")
 async def run_now(body: RunPayload) -> Dict[str, Any]:
     date_str = body.date
     if date_str:
@@ -301,6 +312,7 @@ async def run_now(body: RunPayload) -> Dict[str, Any]:
 
 
 @app.get("/report")
+@app.get("/api/report")
 async def get_report(
     date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
 ) -> Dict[str, Any]:

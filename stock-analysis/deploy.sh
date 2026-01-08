@@ -26,11 +26,15 @@ echo ">>> 建立/激活虚拟环境"
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
-pip install fastapi uvicorn[standard] apscheduler pydantic
+pip install -r "$BACKEND_DIR/requirements.txt"
 
 echo ">>> 构建前端 (Vite + Preact)"
 cd "$FRONT_DIR"
 npm install
+if [[ -n "${VITE_API_BASE_URL:-}" ]]; then
+  echo ">>> 前端 API 基地址: ${VITE_API_BASE_URL}"
+  export VITE_API_BASE_URL
+fi
 npm run build
 cd "$BACKEND_DIR"
 

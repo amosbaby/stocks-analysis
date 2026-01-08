@@ -10,7 +10,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install fastapi uvicorn[standard] apscheduler pydantic
+pip install -r requirements.txt
 
 cd stock-analysis/preact-terminal
 npm install
@@ -32,6 +32,14 @@ pm2 logs a-share-api
 cd stock-analysis/preact-terminal
 npm run build   # 输出到 dist
 ```
+前端构建时可通过环境变量指定 API 基地址：
+```bash
+VITE_API_BASE_URL=https://api.example.com ./deploy.sh
+```
+示例文件：
+- `preact-terminal/.env.production`（生产默认）
+- `preact-terminal/.env.staging`（预发示例）
+- `preact-terminal/.env.example`（模板）
 将 `dist/` 作为 Nginx 静态目录。示例 Nginx 配置（`/etc/nginx/conf.d/a-share.conf`）：
 ```
 server {

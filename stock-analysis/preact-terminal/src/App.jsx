@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import * as echarts from "echarts";
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
+const toApiUrl = (path) => {
+  if (!apiBaseUrl) return path;
+  return `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+};
+
 const fallbackReport = {
   timestamp: "2026-01-08 09:32:08",
   index: 4077.72,
@@ -31,19 +37,22 @@ const fallbackReport = {
       title: "基准情景",
       probability: 60,
       type: "base",
-      description: "指数在4060-4085区间弱势震荡。主力持续流出，散户流入放缓，放量滞涨疲态尽显。",
+      description:
+        "指数在4060-4085区间弱势震荡。主力持续流出，散户流入放缓，放量滞涨疲态尽显。",
     },
     {
       title: "乐观情景",
       probability: 25,
       type: "optimistic",
-      description: "金融板块早盘急跌后小幅反弹，带动指数收于4090上方。需成交额维持且主力流出收窄。",
+      description:
+        "金融板块早盘急跌后小幅反弹，带动指数收于4090上方。需成交额维持且主力流出收窄。",
     },
     {
       title: "悲观情景",
       probability: 15,
       type: "pessimistic",
-      description: "跌破4060支撑下探4040。主力流出加速，引发杠杆资金恐慌抛售，出现跳水行情。",
+      description:
+        "跌破4060支撑下探4040。主力流出加速，引发杠杆资金恐慌抛售，出现跳水行情。",
     },
   ],
   aiAdvice: [
@@ -76,8 +85,12 @@ function MetricCard({ label, value, unit, status, subValue }) {
     success: "text-green-500 border-green-900/50 bg-green-950/20",
   };
   return (
-    <div class={`p-4 border rounded-lg ${statusColors[status]} transition-all duration-300`}>
-      <div class="text-xs font-medium uppercase tracking-wider mb-1 opacity-70">{label}</div>
+    <div
+      class={`p-4 border rounded-lg ${statusColors[status]} transition-all duration-300`}
+    >
+      <div class="text-xs font-medium uppercase tracking-wider mb-1 opacity-70">
+        {label}
+      </div>
       <div class="flex items-baseline gap-1">
         <span class="text-2xl font-bold mono">{value}</span>
         {unit && <span class="text-xs opacity-60">{unit}</span>}
@@ -91,7 +104,9 @@ export default function App() {
   const gaugeRef = useRef(null);
   const flowRef = useRef(null);
   const [report, setReport] = useState(fallbackReport);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -134,7 +149,11 @@ export default function App() {
     () => ({
       backgroundColor: "transparent",
       grid: { left: 10, right: 30, top: 10, bottom: 10 },
-      xAxis: { type: "value", axisLabel: { show: false }, splitLine: { show: false } },
+      xAxis: {
+        type: "value",
+        axisLabel: { show: false },
+        splitLine: { show: false },
+      },
       yAxis: {
         type: "category",
         data: ["主力资金", "散户资金"],
@@ -164,7 +183,7 @@ export default function App() {
     setLoading(true);
     setMessage("正在加载...");
     try {
-      const res = await fetch(`/api/report?date=${dateStr}`);
+      const res = await fetch(toApiUrl(`/api/report?date=${dateStr}`));
       if (res.status === 404) {
         setMessage("当日无数据，请手动触发生成");
         return;
@@ -187,7 +206,7 @@ export default function App() {
     setLoading(true);
     setMessage("正在触发生成...");
     try {
-      const res = await fetch("/api/run", {
+      const res = await fetch(toApiUrl("/api/run"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: dateStr }),
@@ -246,13 +265,18 @@ export default function App() {
           <div class="flex items-center gap-8 font-mono text-sm">
             <div class="flex flex-col items-end">
               <span class="text-[10px] uppercase text-zinc-500">上证指数</span>
-              <span class={`font-bold ${report.change < 0 ? "text-green-500" : "text-red-500"}`}>
-                {Number(report.index).toFixed(2)} ({Number(report.change).toFixed(2)}%)
+              <span
+                class={`font-bold ${report.change < 0 ? "text-green-500" : "text-red-500"}`}
+              >
+                {Number(report.index).toFixed(2)} (
+                {Number(report.change).toFixed(2)}%)
               </span>
             </div>
             <div class="flex flex-col items-end">
               <span class="text-[10px] uppercase text-zinc-500">预估成交</span>
-              <span class="font-bold text-zinc-200">{report.volumeEstimate}T</span>
+              <span class="font-bold text-zinc-200">
+                {report.volumeEstimate}T
+              </span>
             </div>
           </div>
         </div>
@@ -294,10 +318,13 @@ export default function App() {
               </svg>
             </div>
             <div class="flex-1">
-              <h2 class="mb-2 text-2xl font-bold text-red-500">顶级预警：天量滞涨 / 趋势末期</h2>
+              <h2 class="mb-2 text-2xl font-bold text-red-500">
+                顶级预警：天量滞涨 / 趋势末期
+              </h2>
               <p class="mb-4 max-w-4xl text-sm leading-relaxed text-zinc-300">
                 当前市场处于上涨趋势末期的巨量换手阶段，主力资金离场意愿极其强烈。杠杆率已达
-                <span class="font-bold text-red-500"> 2.53%</span> 风险阈值，散户大量承接主力抛单，市场脆弱性剧增。
+                <span class="font-bold text-red-500"> 2.53%</span>{" "}
+                风险阈值，散户大量承接主力抛单，市场脆弱性剧增。
               </p>
               <div class="flex flex-wrap gap-4">
                 <div class="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-900/20">
@@ -338,20 +365,48 @@ export default function App() {
 
           <div class="space-y-6 lg:col-span-4">
             <div class="grid grid-cols-2 gap-4">
-              <MetricCard label="市场杠杆率" value={report.leverageRate} unit="%" status="danger" subValue="融资买入惯性冲高" />
-              <MetricCard label="全天预估成交" value={report.volumeEstimate} unit="万亿" status="danger" subValue="较5日均量放量17%" />
-              <MetricCard label="赚钱效应" value={report.winRate} unit="%" status="warning" subValue="结构性分化严重" />
-              <MetricCard label="拥挤度" value="44.16" unit="%" status="neutral" subValue="大盘情绪中性偏冷" />
+              <MetricCard
+                label="市场杠杆率"
+                value={report.leverageRate}
+                unit="%"
+                status="danger"
+                subValue="融资买入惯性冲高"
+              />
+              <MetricCard
+                label="全天预估成交"
+                value={report.volumeEstimate}
+                unit="万亿"
+                status="danger"
+                subValue="较5日均量放量17%"
+              />
+              <MetricCard
+                label="赚钱效应"
+                value={report.winRate}
+                unit="%"
+                status="warning"
+                subValue="结构性分化严重"
+              />
+              <MetricCard
+                label="拥挤度"
+                value="44.16"
+                unit="%"
+                status="neutral"
+                subValue="大盘情绪中性偏冷"
+              />
             </div>
 
             <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
               <div class="mb-6 flex items-center justify-between">
-                <h3 class="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">资金背离区 (亿元)</h3>
+                <h3 class="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                  资金背离区 (亿元)
+                </h3>
                 <span class="text-[10px] text-zinc-500">主力出 / 散户进</span>
               </div>
               <div class="h-[200px] w-full" ref={flowRef}></div>
               <p class="mt-4 rounded bg-zinc-950 p-3 text-[11px] italic leading-relaxed text-zinc-500">
-                主力流出 {Math.abs(report.mainFlow)} 亿，散户逆势买入 {Math.abs(report.retailFlow)} 亿。典型的牛末换手特征，主导力量正在从专业机构向非理性散户转换。
+                主力流出 {Math.abs(report.mainFlow)} 亿，散户逆势买入{" "}
+                {Math.abs(report.retailFlow)}{" "}
+                亿。典型的牛末换手特征，主导力量正在从专业机构向非理性散户转换。
               </p>
             </div>
           </div>
@@ -359,13 +414,17 @@ export default function App() {
           <div class="space-y-6 lg:col-span-5">
             <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
               <div class="mb-6 flex items-center justify-between">
-                <h3 class="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">板块热力分布 (人气追踪)</h3>
+                <h3 class="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                  板块热力分布 (人气追踪)
+                </h3>
               </div>
 
               <div class="space-y-4">
                 <div>
                   <div class="mb-2 flex items-center justify-between">
-                    <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">强势防御区 (煤炭/制药)</span>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                      强势防御区 (煤炭/制药)
+                    </span>
                     <span class="text-[10px] text-green-500">HOT &gt; 80</span>
                   </div>
                   <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -374,7 +433,9 @@ export default function App() {
                         key={s.name}
                         class="group cursor-default rounded border border-red-800/40 bg-red-900/20 p-3 transition-colors hover:bg-red-900/40"
                       >
-                        <div class="mb-1 text-[11px] font-bold text-red-400">{s.name}</div>
+                        <div class="mb-1 text-[11px] font-bold text-red-400">
+                          {s.name}
+                        </div>
                         <div class="flex items-baseline justify-between">
                           <span class="mono text-lg font-bold">{s.value}</span>
                           <span class="text-[10px] opacity-60">🔥</span>
@@ -386,7 +447,9 @@ export default function App() {
 
                 <div class="pt-2">
                   <div class="mb-2 flex items-center justify-between">
-                    <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">极度虚弱区 (金融/游戏)</span>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                      极度虚弱区 (金融/游戏)
+                    </span>
                     <span class="text-[10px] text-red-500">COLD &lt; 20</span>
                   </div>
                   <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -395,10 +458,14 @@ export default function App() {
                         key={s.name}
                         class="group cursor-default rounded border border-green-900/20 bg-green-900/10 p-3 transition-colors hover:bg-green-950/30"
                       >
-                        <div class="mb-1 text-[11px] font-bold text-green-700">{s.name}</div>
+                        <div class="mb-1 text-[11px] font-bold text-green-700">
+                          {s.name}
+                        </div>
                         <div class="flex items-baseline justify-between">
                           <span class="mono text-lg font-bold">{s.value}</span>
-                          <span class="text-[10px] text-green-900 opacity-60">❄️</span>
+                          <span class="text-[10px] text-green-900 opacity-60">
+                            ❄️
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -408,7 +475,9 @@ export default function App() {
             </div>
 
             <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-              <h3 class="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider">AI 核心避险策略</h3>
+              <h3 class="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
+                AI 核心避险策略
+              </h3>
               <ul class="space-y-3">
                 {report.aiAdvice.map((advice) => (
                   <li key={advice} class="flex gap-3 text-sm text-zinc-300">
@@ -421,7 +490,9 @@ export default function App() {
           </div>
 
           <div class="space-y-4 lg:col-span-3">
-            <h3 class="mb-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-300">上午收盘推演</h3>
+            <h3 class="mb-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-300">
+              上午收盘推演
+            </h3>
 
             {report.scenarios.map((scen) => (
               <div
@@ -446,15 +517,20 @@ export default function App() {
                   >
                     {scen.title}
                   </span>
-                  <span class="mono text-xl font-black italic opacity-80">{scen.probability}%</span>
+                  <span class="mono text-xl font-black italic opacity-80">
+                    {scen.probability}%
+                  </span>
                 </div>
-                <p class="text-xs font-medium leading-relaxed text-zinc-400">{scen.description}</p>
+                <p class="text-xs font-medium leading-relaxed text-zinc-400">
+                  {scen.description}
+                </p>
               </div>
             ))}
 
             <div class="mt-8 rounded border border-zinc-800 bg-zinc-950 p-4">
               <p class="text-[10px] leading-tight text-zinc-600">
-                免责声明: 本报告基于公开数据和量化模型生成，所有结论仅供参考，不构成任何投资建议。杠杆交易风险巨大，请理性操作。
+                免责声明:
+                本报告基于公开数据和量化模型生成，所有结论仅供参考，不构成任何投资建议。杠杆交易风险巨大，请理性操作。
               </p>
             </div>
           </div>
