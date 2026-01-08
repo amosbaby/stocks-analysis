@@ -79,8 +79,10 @@ server {
 ## 接口
 - `GET /health`：健康检查
 - `GET /report?date=YYYY-MM-DD`：读取指定日期 JSON；若不存在返回 404，前端提示手动触发
+- `GET /report/raw?date=YYYY-MM-DD`：返回报告 JSON 原文（SSE/前端查看用）
 - `GET /reports`：列出可用 JSON 文件名
 - `POST /run`：手动触发生成（可带 `{ "date": "2026-01-08" }`），生成完即返回内容
+- `GET /run/stream`：SSE 推送进度与结果（参数 `date=YYYY-MM-DD`）
 - `GET /config` / `POST /config`：查看或更新调度时间
 
 ## 手动执行（不通过 API）

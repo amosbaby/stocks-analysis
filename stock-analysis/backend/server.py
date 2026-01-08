@@ -2,12 +2,15 @@ import asyncio
 import importlib.util
 import json
 import os
+import queue
+import threading
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, validator
 
 try:
@@ -70,7 +73,21 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
     liquidity = result.get("liquidity", {}) or {}
     margin = result.get("margin_trading", {}) or {}
     sentiment = result.get("sentiment", {}) or {}
+    intermarket = result.get("intermarket", {}) or {}
     heat_map = result.get("sector_heat_map")
+
+    def to_number(value: Any) -> float:
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").replace("亿元", "").replace("亿", "")
+            try:
+                return float(cleaned)
+            except ValueError:
+                return 0.0
+        return 0.0
 
     strong_list: List[Dict[str, Any]] = []
     weak_list: List[Dict[str, Any]] = []
@@ -92,13 +109,18 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
     # 兜底数据
     payload: Dict[str, Any] = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "index": liquidity.get("sh_index_close", 0),
-        "change": liquidity.get("sh_pct_chg", 0),
-        "volumeEstimate": liquidity.get("total_volume", "0"),
-        "leverageRate": margin.get("leverage_ratio", 0),
-        "mainFlow": liquidity.get("main_net_inflow", 0),
-        "retailFlow": liquidity.get("retail_net_inflow", 0),
-        "winRate": sentiment.get("赚钱效应", 0),
+        "index": to_number(
+            intermarket.get("sh_index_close", liquidity.get("sh_index_close", 0))
+        ),
+        "change": to_number(
+            intermarket.get("sh_pct_chg", liquidity.get("sh_pct_chg", 0))
+        ),
+        "volumeEstimate": to_number(liquidity.get("total_volume", "0")),
+        "volumeEstimateRaw": liquidity.get("total_volume", "0"),
+        "leverageRate": to_number(margin.get("leverage_ratio", 0)),
+        "mainFlow": to_number(liquidity.get("main_net_inflow", 0)),
+        "retailFlow": to_number(liquidity.get("retail_net_inflow", 0)),
+        "winRate": to_number(sentiment.get("赚钱效应", 0)),
         "sectors": {
             "strong": strong_list,
             "weak": weak_list,
@@ -134,7 +156,10 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
     return payload
 
 
-def generate_report(date_str: Optional[str] = None) -> Dict[str, Any]:
+def generate_report(
+    date_str: Optional[str] = None,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
     """
     调用分析逻辑并将结果写入 data/YYYY-MM-DD.json。
     如果 AdvancedStockAnalyzer 不可用，则返回示例数据。
@@ -142,6 +167,10 @@ def generate_report(date_str: Optional[str] = None) -> Dict[str, Any]:
     ensure_dirs()
     date_str = date_str or date.today().strftime("%Y-%m-%d")
     filename = DATA_DIR / f"{date_str}.json"
+
+    def emit(percent: int, title: str, detail: str) -> None:
+        if progress_cb:
+            progress_cb({"percent": percent, "title": title, "detail": detail})
 
     def load_analyzer():
         main_path = BASE_DIR / "main.py"
@@ -154,13 +183,16 @@ def generate_report(date_str: Optional[str] = None) -> Dict[str, Any]:
             return getattr(module, "AdvancedStockAnalyzer", None)
         return None
 
+    emit(10, "初始化", "准备分析器与环境")
     AdvancedStockAnalyzer = load_analyzer()
 
     payload: Dict[str, Any]
     if AdvancedStockAnalyzer is not None:
         try:
+            emit(40, "分析中", "加载行情与资金面数据")
             analyzer = AdvancedStockAnalyzer()
             analyzer.run_analysis()
+            emit(70, "整理结果", "生成风险指标与板块热力")
             payload = transform_analyzer_result(analyzer)
         except Exception as exc:  # pragma: no cover
             payload = {
@@ -168,6 +200,7 @@ def generate_report(date_str: Optional[str] = None) -> Dict[str, Any]:
                 "timestamp": datetime.now().isoformat(),
             }
     else:  # Fallback mock for environments without full deps
+        emit(55, "生成示例", "缺少依赖，使用示例数据")
         payload = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "index": 4077.72,
@@ -216,8 +249,10 @@ def generate_report(date_str: Optional[str] = None) -> Dict[str, Any]:
             ],
         }
 
+    emit(85, "写入报告", "保存日报 JSON")
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+    emit(100, "完成", "报告已生成")
     return payload
 
 
@@ -228,6 +263,14 @@ def read_report(date_str: Optional[str] = None) -> Dict[str, Any]:
         raise FileNotFoundError(f"未找到 {filepath.name}")
     with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def read_report_raw(date_str: Optional[str] = None) -> str:
+    date_str = date_str or date.today().strftime("%Y-%m-%d")
+    filepath = DATA_DIR / f"{date_str}.json"
+    if not filepath.exists():
+        raise FileNotFoundError(f"未找到 {filepath.name}")
+    return filepath.read_text(encoding="utf-8")
 
 
 app = FastAPI(title="A-Share Risk Backend", version="1.0.0")
@@ -311,6 +354,56 @@ async def run_now(body: RunPayload) -> Dict[str, Any]:
     }
 
 
+@app.get("/run/stream")
+@app.get("/api/run/stream")
+async def run_stream(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+) -> StreamingResponse:
+    date_str = date
+    if date_str:
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date 格式必须为 YYYY-MM-DD")
+    q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+
+    def emit(event: str, data: Dict[str, Any]) -> None:
+        q.put({"event": event, "data": data})
+
+    def progress_cb(payload: Dict[str, Any]) -> None:
+        emit("progress", payload)
+
+    def worker() -> None:
+        try:
+            payload = generate_report(date_str, progress_cb=progress_cb)
+            if isinstance(payload, dict) and payload.get("error"):
+                emit("failed", {"detail": payload.get("error")})
+            else:
+                emit(
+                    "done",
+                    {
+                        "date": date_str or date.today().strftime("%Y-%m-%d"),
+                        "data": payload,
+                    },
+                )
+        except Exception as exc:  # pragma: no cover
+            emit("failed", {"detail": str(exc)})
+        finally:
+            emit("close", {})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    async def event_stream():
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item["event"] == "close":
+                break
+            data = json.dumps(item["data"], ensure_ascii=False)
+            yield f"event: {item['event']}\ndata: {data}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.get("/report")
 @app.get("/api/report")
 async def get_report(
@@ -324,6 +417,25 @@ async def get_report(
     try:
         data = await asyncio.to_thread(read_report, date)
         return {"date": date or date.today().strftime("%Y-%m-%d"), "data": data}
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail="指定日期的报告不存在，请手动触发生成"
+        )
+
+
+@app.get("/report/raw")
+@app.get("/api/report/raw")
+async def get_report_raw(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+) -> Response:
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date 格式必须为 YYYY-MM-DD")
+    try:
+        text = await asyncio.to_thread(read_report_raw, date)
+        return Response(content=text, media_type="application/json")
     except FileNotFoundError:
         raise HTTPException(
             status_code=404, detail="指定日期的报告不存在，请手动触发生成"

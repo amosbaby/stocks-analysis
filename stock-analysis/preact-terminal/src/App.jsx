@@ -100,6 +100,13 @@ function MetricCard({ label, value, unit, status, subValue }) {
   );
 }
 
+const toNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const formatFlow = (value) => Math.abs(toNumber(value)).toFixed(2);
+
 export default function App() {
   const gaugeRef = useRef(null);
   const flowRef = useRef(null);
@@ -109,6 +116,12 @@ export default function App() {
   );
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const streamRef = useRef(null);
+  const [rawModalOpen, setRawModalOpen] = useState(false);
+  const [rawContent, setRawContent] = useState("");
+  const [rawLoading, setRawLoading] = useState(false);
+  const [rawError, setRawError] = useState("");
 
   const gaugeOption = useMemo(
     () => ({
@@ -202,32 +215,110 @@ export default function App() {
     }
   };
 
+  const loadRawReport = async (dateStr) => {
+    setRawLoading(true);
+    setRawError("");
+    setRawContent("");
+    try {
+      const res = await fetch(toApiUrl(`/api/report/raw?date=${dateStr}`));
+      if (res.status === 404) {
+        setRawError("当日无数据，请先触发生成");
+        setRawModalOpen(true);
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "加载失败");
+      }
+      const text = await res.text();
+      setRawContent(text);
+      setRawModalOpen(true);
+    } catch (err) {
+      setRawError(err.message || "加载失败");
+      setRawModalOpen(true);
+    } finally {
+      setRawLoading(false);
+    }
+  };
+
   const triggerReport = async (dateStr) => {
     setLoading(true);
     setMessage("正在触发生成...");
-    try {
-      const res = await fetch(toApiUrl("/api/run"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: dateStr }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "触发失败");
-      }
-      const json = await res.json();
-      setReport(json.data);
-      setMessage("生成并加载完成");
-    } catch (err) {
-      setMessage(err.message || "触发失败");
-    } finally {
-      setLoading(false);
+    setProgress({ percent: 5, title: "开始生成", detail: "正在建立连接" });
+    if (streamRef.current) {
+      streamRef.current.close();
     }
+
+    const streamUrl = toApiUrl(`/api/run/stream?date=${dateStr}`);
+    const es = new EventSource(streamUrl);
+    streamRef.current = es;
+
+    es.addEventListener("progress", (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        setProgress(data);
+      } catch {
+        setProgress({ percent: 30, title: "分析中", detail: "收到进度更新" });
+      }
+    });
+
+    es.addEventListener("done", (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        setReport(data.data);
+        setMessage("生成并加载完成");
+        setProgress({
+          percent: 100,
+          title: "完成",
+          detail: "报告已生成并加载",
+        });
+      } catch {
+        setMessage("生成完成但解析失败");
+        setProgress({ percent: 100, title: "完成", detail: "报告已生成" });
+      } finally {
+        setLoading(false);
+        es.close();
+        streamRef.current = null;
+        setTimeout(() => setProgress(null), 2400);
+      }
+    });
+
+    es.addEventListener("failed", (evt) => {
+      let detail = "触发失败";
+      try {
+        const data = JSON.parse(evt.data);
+        detail = data.detail || detail;
+      } catch {
+        // ignore
+      }
+      setMessage(detail);
+      setProgress({ percent: 100, title: "失败", detail });
+      setLoading(false);
+      es.close();
+      streamRef.current = null;
+      setTimeout(() => setProgress(null), 2400);
+    });
+
+    es.onerror = () => {
+      if (!streamRef.current) return;
+      const detail = "连接中断";
+      setMessage(detail);
+      setProgress({ percent: 100, title: "失败", detail });
+      setLoading(false);
+      es.close();
+      streamRef.current = null;
+      setTimeout(() => setProgress(null), 2400);
+    };
   };
 
   useEffect(() => {
     // 首次尝试读取当日数据，若不存在提示手动触发
     loadReport(selectedDate);
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.close();
+      }
+    };
   }, []);
 
   return (
@@ -338,6 +429,49 @@ export default function App() {
           </div>
         </div>
 
+        {progress && (
+          <div class="fixed bottom-6 right-6 z-50 w-72 rounded-lg border border-zinc-800 bg-zinc-950/90 p-4 shadow-xl backdrop-blur">
+            <div class="mb-2 flex items-center justify-between text-xs text-zinc-400">
+              <span>生成进度</span>
+              <span class="mono">{progress.percent}%</span>
+            </div>
+            <div class="mb-3 h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+              <div
+                class="h-full bg-red-500 transition-all duration-500"
+                style={{ width: `${progress.percent}%` }}
+              />
+            </div>
+            <div class="text-sm font-semibold text-zinc-100">
+              {progress.title}
+            </div>
+            <div class="mt-1 text-xs text-zinc-400">{progress.detail}</div>
+          </div>
+        )}
+
+        {rawModalOpen && (
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+            <div class="max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+                <div class="text-sm font-semibold text-zinc-100">原始 JSON</div>
+                <button
+                  class="rounded border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs text-zinc-200 hover:border-red-500"
+                  onClick={() => setRawModalOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+              <div class="max-h-[70vh] overflow-auto p-4">
+                {rawError && <div class="text-sm text-red-400">{rawError}</div>}
+                {!rawError && (
+                  <pre class="whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
+                    {rawContent || "空内容"}
+                  </pre>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div class="lg:col-span-12 flex flex-wrap items-center gap-3">
             <input
@@ -352,6 +486,13 @@ export default function App() {
               onClick={() => loadReport(selectedDate)}
             >
               读取所选日期
+            </button>
+            <button
+              class="rounded border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={rawLoading}
+              onClick={() => loadRawReport(selectedDate)}
+            >
+              {rawLoading ? "读取中..." : "查看原始 JSON"}
             </button>
             <button
               class="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -404,8 +545,8 @@ export default function App() {
               </div>
               <div class="h-[200px] w-full" ref={flowRef}></div>
               <p class="mt-4 rounded bg-zinc-950 p-3 text-[11px] italic leading-relaxed text-zinc-500">
-                主力流出 {Math.abs(report.mainFlow)} 亿，散户逆势买入{" "}
-                {Math.abs(report.retailFlow)}{" "}
+                主力流出 {formatFlow(report.mainFlow)} 亿，散户逆势买入{" "}
+                {formatFlow(report.retailFlow)}{" "}
                 亿。典型的牛末换手特征，主导力量正在从专业机构向非理性散户转换。
               </p>
             </div>
