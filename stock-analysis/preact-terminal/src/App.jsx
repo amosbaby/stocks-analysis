@@ -4,7 +4,11 @@ import * as echarts from "echarts";
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
 const toApiUrl = (path) => {
   if (!apiBaseUrl) return path;
-  return `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (apiBaseUrl.endsWith("/api") && normalizedPath.startsWith("/api/")) {
+    return `${apiBaseUrl}${normalizedPath.slice(4)}`;
+  }
+  return `${apiBaseUrl}${normalizedPath}`;
 };
 
 const fallbackReport = {
