@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - scheduler is optional in dev
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
+REPORTS_DIR = BASE_DIR.parent / "reports"
 
 # Environment-aware config (dev/prod separated)
 APP_ENV = os.getenv("APP_ENV", "dev")
@@ -333,6 +334,17 @@ def read_debug_log(date_str: Optional[str] = None) -> str:
     return filepath.read_text(encoding="utf-8")
 
 
+def read_report_text(date_str: Optional[str] = None) -> str:
+    date_str = date_str or date.today().strftime("%Y-%m-%d")
+    if not REPORTS_DIR.exists():
+        raise FileNotFoundError("报告目录不存在")
+    pattern = f"A_Share_Report_{date_str}_*.txt"
+    matches = sorted(REPORTS_DIR.glob(pattern))
+    if not matches:
+        raise FileNotFoundError(f"未找到 {date_str} 的报告原文")
+    return matches[-1].read_text(encoding="utf-8")
+
+
 def generate_report_detail(mode: str) -> str:
     def load_analyzer():
         main_path = BASE_DIR / "main.py"
@@ -539,6 +551,23 @@ async def get_report_debug(
         return Response(content=text, media_type="text/plain")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="指定日期的调试日志不存在")
+
+
+@app.get("/report/text")
+@app.get("/api/report/text")
+async def get_report_text(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+) -> Response:
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date 格式必须为 YYYY-MM-DD")
+    try:
+        text = await asyncio.to_thread(read_report_text, date)
+        return Response(content=text, media_type="text/plain")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.get("/report/detail")

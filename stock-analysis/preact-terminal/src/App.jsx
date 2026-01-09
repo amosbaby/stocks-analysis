@@ -140,6 +140,10 @@ export default function App() {
   const [rawContent, setRawContent] = useState("");
   const [rawLoading, setRawLoading] = useState(false);
   const [rawError, setRawError] = useState("");
+  const [textModalOpen, setTextModalOpen] = useState(false);
+  const [textContent, setTextContent] = useState("");
+  const [textLoading, setTextLoading] = useState(false);
+  const [textError, setTextError] = useState("");
   const [debugModalOpen, setDebugModalOpen] = useState(false);
   const [debugContent, setDebugContent] = useState("");
   const [debugLoading, setDebugLoading] = useState(false);
@@ -166,6 +170,10 @@ export default function App() {
     indexesExpanded || !hasOverflowIndexes
       ? headerIndexes
       : headerIndexes.slice(0, collapsedCount);
+  const textLines = useMemo(
+    () => (textContent ? textContent.split(/\r?\n/) : []),
+    [textContent],
+  );
 
   const gaugeOption = useMemo(
     () => ({
@@ -282,6 +290,32 @@ export default function App() {
       setRawModalOpen(true);
     } finally {
       setRawLoading(false);
+    }
+  };
+
+  const loadTextReport = async (dateStr) => {
+    setTextLoading(true);
+    setTextError("");
+    setTextContent("");
+    try {
+      const res = await fetch(toApiUrl(`/api/report/text?date=${dateStr}`));
+      if (res.status === 404) {
+        setTextError("当日无报告原文，请先触发生成");
+        setTextModalOpen(true);
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "加载失败");
+      }
+      const text = await res.text();
+      setTextContent(text);
+      setTextModalOpen(true);
+    } catch (err) {
+      setTextError(err.message || "加载失败");
+      setTextModalOpen(true);
+    } finally {
+      setTextLoading(false);
     }
   };
 
@@ -593,6 +627,64 @@ export default function App() {
           </div>
         )}
 
+        {textModalOpen && (
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+            <div class="max-h-[85vh] w-full max-w-5xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
+                <div>
+                  <div class="text-sm font-semibold text-zinc-100">
+                    报告原文
+                  </div>
+                  <div class="text-[11px] text-zinc-500">
+                    {selectedDate} 最新生成版本
+                  </div>
+                </div>
+                <button
+                  class="rounded border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs text-zinc-200 hover:border-red-500"
+                  onClick={() => setTextModalOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+              <div class="max-h-[75vh] overflow-auto px-5 py-4">
+                {textError && (
+                  <div class="text-sm text-red-400">{textError}</div>
+                )}
+                {!textError && (
+                  <div class="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+                    {!textContent && (
+                      <div class="text-sm text-zinc-400">空内容</div>
+                    )}
+                    {textContent && (
+                      <div class="space-y-1 font-mono text-xs leading-relaxed text-zinc-200">
+                        {textLines.map((line, idx) => (
+                          <div
+                            key={`${idx}-${line}`}
+                            class="grid grid-cols-[2.5rem_1fr] gap-3"
+                          >
+                            <span class="text-[10px] text-zinc-500">
+                              {String(idx + 1).padStart(3, " ")}
+                            </span>
+                            <span
+                              class={`whitespace-pre-wrap ${
+                                line.startsWith("=")
+                                  ? "font-semibold text-red-400"
+                                  : "text-zinc-200"
+                              }`}
+                            >
+                              {line || " "}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {debugModalOpen && (
           <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
             <div class="max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
@@ -640,6 +732,13 @@ export default function App() {
               onClick={() => loadRawReport(selectedDate)}
             >
               {rawLoading ? "读取中..." : "查看原始 JSON"}
+            </button>
+            <button
+              class="rounded border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={textLoading}
+              onClick={() => loadTextReport(selectedDate)}
+            >
+              {textLoading ? "读取中..." : "查看报告原文"}
             </button>
             <button
               class="rounded border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-50"
