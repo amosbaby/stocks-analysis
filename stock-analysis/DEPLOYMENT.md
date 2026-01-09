@@ -16,11 +16,22 @@ cd stock-analysis/preact-terminal
 npm install
 ```
 
+## 一键部署脚本（deploy.sh）
+脚本会缓存依赖指纹，避免重复安装；缓存目录为 `.deploy-cache/`。
+常用环境变量：
+- `SKIP_FRONTEND_BUILD=1`：跳过前端依赖安装与构建
+- `VITE_API_BASE_URL=...`：注入前端 API 基地址
+- `APP_ENV=prod`：选择配置文件（默认 `dev`）
+- `LOG_ALL_PRINTS=1`：将 print 输出写入 `logs/YYYY-MM-DD.debug.log`
+如需强制重装依赖，可删除 `.deploy-cache/` 与对应的 `.venv/` 或 `preact-terminal/node_modules/`。
+pm2 启动参数不会随 `restart --update-env` 变化；脚本会记录上次端口到 `.deploy-cache/pm2.port`，端口变更时自动重建进程。
+如需清理端口记录：删除 `.deploy-cache/pm2.port` 后重新运行 `./deploy.sh`。
+
 ## 后端运行（pm2 管理）
-假设代码路径 `/opt/a-share/stock-analysis`，监听 8000 端口：
+假设代码路径 `/opt/a-share/stock-analysis`，监听 3008 端口：
 ```bash
 cd /opt/a-share/stock-analysis
-APP_ENV=prod pm2 start ".venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 8000" \
+APP_ENV=prod pm2 start ".venv/bin/uvicorn backend.server:app --host 0.0.0.0 --port 3008" \
   --name a-share-api --interpreter /bin/bash --cwd /opt/a-share/stock-analysis
 
 # 查看日志
@@ -50,7 +61,7 @@ server {
     index index.html;
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8000/;
+        proxy_pass http://127.0.0.1:3008/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

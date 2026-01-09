@@ -7,7 +7,7 @@ import streamlit as st
 
 
 def load_report() -> Dict[str, Any]:
-    # Replace this with a backend call, e.g. requests.get("http://127.0.0.1:8000/api/report").json()
+    # Replace this with a backend call, e.g. requests.get("http://127.0.0.1:3008/api/report").json()
     raw = {
         "as_of": "2026-01-08 09:32",
         "market_qualitative": "上涨趋势末期",
