@@ -45,6 +45,13 @@ hash_file() {
   fi
 }
 
+get_py_ver() {
+  "$1" - <<'PY'
+import sys
+print(f"{sys.version_info[0]}.{sys.version_info[1]}")
+PY
+}
+
 ensure_cache_dir() {
   mkdir -p "$CACHE_DIR"
 }
@@ -57,8 +64,19 @@ if sys.version_info < (3, 8):
 PY
 
 echo ">>> 建立/激活虚拟环境"
+FORCE_PIP_INSTALL="0"
+DESIRED_PY_VER="$(get_py_ver "$PYTHON_BIN")"
+if [[ -d "$VENV_DIR" && -x "$VENV_DIR/bin/python" ]]; then
+  VENV_PY_VER="$(get_py_ver "$VENV_DIR/bin/python")"
+  if [[ "$VENV_PY_VER" != "$DESIRED_PY_VER" ]]; then
+    echo ">>> 虚拟环境 Python 版本不匹配: ${VENV_PY_VER} -> ${DESIRED_PY_VER}，重建 .venv"
+    rm -rf "$VENV_DIR"
+    FORCE_PIP_INSTALL="1"
+  fi
+fi
 if [[ ! -d "$VENV_DIR" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
+  FORCE_PIP_INSTALL="1"
 fi
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
@@ -69,12 +87,16 @@ OLD_REQ_HASH=""
 if [[ -f "$REQ_HASH_FILE" ]]; then
   OLD_REQ_HASH="$(cat "$REQ_HASH_FILE")"
 fi
-if [[ "$NEW_REQ_HASH" != "$OLD_REQ_HASH" ]]; then
+if [[ "$FORCE_PIP_INSTALL" == "1" || "$NEW_REQ_HASH" != "$OLD_REQ_HASH" ]]; then
   echo ">>> 安装后端依赖 (requirements 变更)"
   pip install -r "$BACKEND_DIR/requirements.txt"
   echo "$NEW_REQ_HASH" > "$REQ_HASH_FILE"
 else
   echo ">>> 后端依赖无变化，跳过 pip install"
+fi
+if [[ ! -x "$VENV_DIR/bin/uvicorn" ]]; then
+  echo ">>> 未发现 uvicorn，可执行文件，重新安装依赖"
+  pip install -r "$BACKEND_DIR/requirements.txt"
 fi
 
 echo ">>> 构建前端 (Vite + Preact)"
