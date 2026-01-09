@@ -1,9 +1,11 @@
+import builtins
 import os
 import pickle
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import akshare as ak
 import numpy as np
@@ -25,12 +27,39 @@ warnings.filterwarnings("ignore")
 
 DEBUG_MODE = True  # 开启调试模式，会打印每个接口的返回列名
 
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / "logs"
+
+
+def _append_debug_log(text):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    log_path = LOG_DIR / f"{date_str}.debug.log"
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(text)
+
+
+_original_print = builtins.print
+
+
+def _log_print(*args, **kwargs):
+    sep = kwargs.get("sep", " ")
+    end = kwargs.get("end", "\n")
+    text = sep.join(str(arg) for arg in args) + end
+    _append_debug_log(text)
+    _original_print(*args, **kwargs)
+
+
+if os.getenv("LOG_ALL_PRINTS", "1") == "1":
+    print = _log_print
+
 
 def debug_print(df, name):
     if DEBUG_MODE:
-        print(f"\n--- 调试信息: {name} ---")
+        header = f"\n--- 调试信息: {name} ---"
+        print(header)
         if df is not None and not df.empty:
-            print("列名:", df.columns.tolist())
+            print(f"列名: {df.columns.tolist()}")
             print("数据预览:")
             print(df.head(3))
         else:
@@ -948,6 +977,22 @@ class AdvancedStockAnalyzer:
         print("正在分析分市场与风格强弱...")
         try:
 
+            def to_float(value):
+                try:
+                    return float(value)
+                except Exception:
+                    return None
+
+            def get_snapshot(df):
+                if df is None or df.empty:
+                    return None
+                latest = df.iloc[-1]
+                close = to_float(latest.get("close"))
+                pct = to_float(latest.get("pct_chg"))
+                if close is None and pct is None:
+                    return None
+                return {"close": close, "pct_chg": pct}
+
             def calc_return(df, days):
                 if df is None or df.empty or len(df) <= days:
                     return None
@@ -980,7 +1025,28 @@ class AdvancedStockAnalyzer:
                 if day_ret is None:
                     day_ret = calc_return(df, 1)
                 week_ret = calc_return(df, 5)
-                perf[name] = {"day_ret": day_ret, "week_ret": week_ret}
+                snapshot = get_snapshot(df)
+                perf[name] = {
+                    "day_ret": day_ret,
+                    "week_ret": week_ret,
+                    "close": snapshot["close"] if snapshot else None,
+                    "pct_chg": snapshot["pct_chg"] if snapshot else day_ret,
+                }
+
+            index_snapshot = {}
+            sh_snapshot = get_snapshot(self.data.get("sh_index"))
+            if sh_snapshot:
+                index_snapshot["上证指数"] = sh_snapshot
+            sz_snapshot = get_snapshot(self.data.get("sz_index"))
+            if sz_snapshot:
+                index_snapshot["深证成指"] = sz_snapshot
+            for name, data in perf.items():
+                if data.get("close") is None and data.get("pct_chg") is None:
+                    continue
+                index_snapshot[name] = {
+                    "close": data.get("close"),
+                    "pct_chg": data.get("pct_chg"),
+                }
 
             def compare(a, b, label_a, label_b):
                 if a is None or b is None:
@@ -1018,9 +1084,11 @@ class AdvancedStockAnalyzer:
                 "style_summary": " | ".join([s for s in style_summary if s]),
                 "performance_rank": perf_rank_str,
             }
+            self.analysis_result["index_snapshot"] = index_snapshot
         except Exception as e:
             print(f"  - 分市场与风格分析失败: {e}")
             self.analysis_result["style"] = {}
+            self.analysis_result["index_snapshot"] = {}
         print("分市场与风格强弱分析完成。")
 
     def analyze_limitup_structure(self):
@@ -1762,7 +1830,7 @@ class AdvancedStockAnalyzer:
         except Exception as e:
             print(f"\n[错误] 报告保存失败: {e}")
 
-    def run_analysis(self):
+    def run_analysis(self, include_conclusion=True):
         now = datetime.now()
         trade_day = self._is_trade_day(now.date())
         self.is_trading_day = trade_day if trade_day is not None else now.weekday() < 5
@@ -1796,8 +1864,9 @@ class AdvancedStockAnalyzer:
             self.analyze_market_stage()
             # self.analyze_etf_technical()
             self.comprehensive_scoring()
-            self.analyze_conclusion()
-            self.print_report()
+            if include_conclusion:
+                self.analyze_conclusion()
+                self.print_report()
 
 
 if __name__ == "__main__":

@@ -8,10 +8,11 @@ BACKEND_DIR="$ROOT"
 FRONT_DIR="$ROOT/preact-terminal"
 VENV_DIR="$ROOT/.venv"
 APP_ENV="${APP_ENV:-prod}"
+LOG_ALL_PRINTS="${LOG_ALL_PRINTS:-0}"
 PORT="${PORT:-8000}"
 PM2_NAME="${PM2_NAME:-a-share-api}"
 
-echo ">>> 部署环境: APP_ENV=${APP_ENV}, PORT=${PORT}"
+echo ">>> 部署环境: APP_ENV=${APP_ENV}, PORT=${PORT}, LOG_ALL_PRINTS=${LOG_ALL_PRINTS}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "缺少依赖: $1" >&2; exit 1; }
@@ -41,7 +42,7 @@ cd "$BACKEND_DIR"
 echo ">>> 启动/重启后端 (pm2 + uvicorn)"
 # 使用 --interpreter none 让 pm2 直接执行 uvicorn 二进制
 APP_ENV="$APP_ENV" PORT="$PORT" pm2 delete "$PM2_NAME" >/dev/null 2>&1 || true
-APP_ENV="$APP_ENV" PORT="$PORT" pm2 start "$VENV_DIR/bin/uvicorn" \
+APP_ENV="$APP_ENV" PORT="$PORT" LOG_ALL_PRINTS="$LOG_ALL_PRINTS" pm2 start "$VENV_DIR/bin/uvicorn" \
   --name "$PM2_NAME" \
   --cwd "$BACKEND_DIR" \
   --interpreter none \

@@ -106,6 +106,24 @@ const toNumber = (value) => {
 };
 
 const formatFlow = (value) => Math.abs(toNumber(value)).toFixed(2);
+const reportTitles = [
+  {
+    key: "LIVE_MORNING",
+    title: "A股市场多维度实时分析报告 (早盘)",
+  },
+  {
+    key: "MIDDAY_SUMMARY",
+    title: "A股市场午间总结报告",
+  },
+  {
+    key: "LIVE_AFTERNOON",
+    title: "A股市场多维度实时分析报告 (午盘)",
+  },
+  {
+    key: "POST_MARKET",
+    title: "A股市场多维度综合复盘报告",
+  },
+];
 
 export default function App() {
   const gaugeRef = useRef(null);
@@ -122,6 +140,32 @@ export default function App() {
   const [rawContent, setRawContent] = useState("");
   const [rawLoading, setRawLoading] = useState(false);
   const [rawError, setRawError] = useState("");
+  const [debugModalOpen, setDebugModalOpen] = useState(false);
+  const [debugContent, setDebugContent] = useState("");
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugError, setDebugError] = useState("");
+  const [indexesExpanded, setIndexesExpanded] = useState(false);
+  const [expandedReportKey, setExpandedReportKey] = useState(null);
+  const [detailLoading, setDetailLoading] = useState({});
+  const [detailError, setDetailError] = useState({});
+  const showVolume = import.meta.env.VITE_SHOW_VOLUME !== "false";
+
+  const headerIndexes =
+    report.indexes && report.indexes.length
+      ? report.indexes
+      : [
+          {
+            name: "上证指数",
+            close: report.index,
+            change: report.change,
+          },
+        ];
+  const collapsedCount = 3;
+  const hasOverflowIndexes = headerIndexes.length > collapsedCount;
+  const visibleIndexes =
+    indexesExpanded || !hasOverflowIndexes
+      ? headerIndexes
+      : headerIndexes.slice(0, collapsedCount);
 
   const gaugeOption = useMemo(
     () => ({
@@ -241,6 +285,32 @@ export default function App() {
     }
   };
 
+  const loadDebugLog = async (dateStr) => {
+    setDebugLoading(true);
+    setDebugError("");
+    setDebugContent("");
+    try {
+      const res = await fetch(toApiUrl(`/api/report/debug?date=${dateStr}`));
+      if (res.status === 404) {
+        setDebugError("当日暂无调试日志");
+        setDebugModalOpen(true);
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "加载失败");
+      }
+      const text = await res.text();
+      setDebugContent(text);
+      setDebugModalOpen(true);
+    } catch (err) {
+      setDebugError(err.message || "加载失败");
+      setDebugModalOpen(true);
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
   const triggerReport = async (dateStr) => {
     setLoading(true);
     setMessage("正在触发生成...");
@@ -311,6 +381,32 @@ export default function App() {
     };
   };
 
+  const loadReportDetail = async (mode) => {
+    if (!mode) return;
+    if (report.reportDetails?.[mode]) return;
+    setDetailLoading((prev) => ({ ...prev, [mode]: true }));
+    setDetailError((prev) => ({ ...prev, [mode]: "" }));
+    try {
+      const res = await fetch(toApiUrl(`/api/report/detail?mode=${mode}`));
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "加载失败");
+      }
+      const json = await res.json();
+      setReport((prev) => ({
+        ...prev,
+        reportDetails: { ...(prev.reportDetails || {}), [mode]: json.detail },
+      }));
+    } catch (err) {
+      setDetailError((prev) => ({
+        ...prev,
+        [mode]: err.message || "加载失败",
+      }));
+    } finally {
+      setDetailLoading((prev) => ({ ...prev, [mode]: false }));
+    }
+  };
+
   useEffect(() => {
     // 首次尝试读取当日数据，若不存在提示手动触发
     loadReport(selectedDate);
@@ -353,22 +449,47 @@ export default function App() {
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-8 font-mono text-sm">
-            <div class="flex flex-col items-end">
-              <span class="text-[10px] uppercase text-zinc-500">上证指数</span>
-              <span
-                class={`font-bold ${report.change < 0 ? "text-green-500" : "text-red-500"}`}
+          <div class="flex items-center gap-6 font-mono text-sm">
+            <div class="flex flex-row-reverse items-center gap-3">
+              {hasOverflowIndexes && (
+                <button
+                  class="rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-300 hover:border-red-500"
+                  onClick={() => setIndexesExpanded((prev) => !prev)}
+                >
+                  {indexesExpanded ? "折叠" : "展开"}
+                </button>
+              )}
+              <div
+                class={`text-right text-[11px] leading-tight ${indexesExpanded ? "flex max-h-14 max-w-[520px] flex-row-reverse flex-wrap items-center justify-end gap-x-4 gap-y-1 overflow-hidden" : "flex max-h-14 flex-row-reverse flex-wrap items-center justify-end gap-x-4 gap-y-1 sm:max-h-none sm:flex-nowrap sm:gap-x-6"}`}
               >
-                {Number(report.index).toFixed(2)} (
-                {Number(report.change).toFixed(2)}%)
-              </span>
+                {visibleIndexes.map((item) => (
+                  <div
+                    key={item.name}
+                    class="flex items-center gap-2 whitespace-nowrap"
+                  >
+                    <span class="text-[10px] uppercase text-zinc-500">
+                      {item.name}
+                    </span>
+                    <span
+                      class={`font-bold ${toNumber(item.change) < 0 ? "text-green-500" : "text-red-500"}`}
+                    >
+                      {toNumber(item.close).toFixed(2)} (
+                      {toNumber(item.change).toFixed(2)}%)
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div class="flex flex-col items-end">
-              <span class="text-[10px] uppercase text-zinc-500">预估成交</span>
-              <span class="font-bold text-zinc-200">
-                {report.volumeEstimate}T
-              </span>
-            </div>
+            {showVolume && (
+              <div class="flex flex-col items-end">
+                <span class="text-[10px] uppercase text-zinc-500">
+                  预估成交
+                </span>
+                <span class="font-bold text-zinc-200">
+                  {report.volumeEstimate}T
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -472,6 +593,32 @@ export default function App() {
           </div>
         )}
 
+        {debugModalOpen && (
+          <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+            <div class="max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+                <div class="text-sm font-semibold text-zinc-100">调试日志</div>
+                <button
+                  class="rounded border border-zinc-800 bg-zinc-900 px-3 py-1 text-xs text-zinc-200 hover:border-red-500"
+                  onClick={() => setDebugModalOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
+              <div class="max-h-[70vh] overflow-auto p-4">
+                {debugError && (
+                  <div class="text-sm text-red-400">{debugError}</div>
+                )}
+                {!debugError && (
+                  <pre class="whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">
+                    {debugContent || "空内容"}
+                  </pre>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
           <div class="lg:col-span-12 flex flex-wrap items-center gap-3">
             <input
@@ -493,6 +640,13 @@ export default function App() {
               onClick={() => loadRawReport(selectedDate)}
             >
               {rawLoading ? "读取中..." : "查看原始 JSON"}
+            </button>
+            <button
+              class="rounded border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-200 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={debugLoading}
+              onClick={() => loadDebugLog(selectedDate)}
+            >
+              {debugLoading ? "读取中..." : "查看调试日志"}
             </button>
             <button
               class="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -631,8 +785,68 @@ export default function App() {
           </div>
 
           <div class="space-y-4 lg:col-span-3">
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+              <div class="mb-3 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                报告类型
+              </div>
+              <div class="space-y-2 text-xs text-zinc-300">
+                {reportTitles.map((item) => {
+                  const isExpanded = expandedReportKey === item.key;
+                  const isCurrent = report.runMode === item.key;
+                  const detail =
+                    report.reportDetails?.[item.key] ||
+                    (isCurrent ? report.conclusionRaw : "");
+                  const isLoading = detailLoading[item.key];
+                  const errorMsg = detailError[item.key];
+                  return (
+                    <div
+                      key={item.key}
+                      class="rounded border border-zinc-800/80"
+                    >
+                      <button
+                        class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-950/40"
+                        onClick={() => {
+                          const next = isExpanded ? null : item.key;
+                          setExpandedReportKey(next);
+                          if (!isExpanded) {
+                            loadReportDetail(item.key);
+                          }
+                        }}
+                      >
+                        <span class="flex items-center gap-2">
+                          <span
+                            class={`h-1.5 w-1.5 rounded-full ${
+                              isCurrent ? "bg-red-500" : "bg-zinc-600"
+                            }`}
+                          ></span>
+                          <span class="leading-snug">{item.title}</span>
+                        </span>
+                        <span class="text-[10px] text-zinc-500">
+                          {isExpanded ? "收起" : "展开"}
+                        </span>
+                      </button>
+                      {isExpanded && (
+                        <div class="border-t border-zinc-800/80 px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+                          {isLoading ? (
+                            "加载中..."
+                          ) : errorMsg ? (
+                            <span class="text-red-400">{errorMsg}</span>
+                          ) : detail ? (
+                            <pre class="whitespace-pre-wrap font-sans">
+                              {detail}
+                            </pre>
+                          ) : (
+                            "暂无详情"
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <h3 class="mb-2 px-1 text-sm font-bold uppercase tracking-wider text-zinc-300">
-              上午收盘推演
+              {report.forecastTitle || "明日走势推演"}
             </h3>
 
             {report.scenarios.map((scen) => (

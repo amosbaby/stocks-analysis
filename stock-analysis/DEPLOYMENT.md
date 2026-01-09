@@ -65,11 +65,16 @@ server {
 
 ## 配置与调度
 - 环境变量：`APP_ENV=dev|prod`（默认 dev），决定读取 `config/{env}.json`
+- 可选：`LOG_ALL_PRINTS=1` 时，将所有 `print(...)` 输出写入 `logs/YYYY-MM-DD.debug.log`
 - 配置示例（`config/prod.json`，被忽略不随代码更新覆盖）：
 ```json
 {
   "schedule_times": ["09:25", "12:30", "15:10"]
 }
+```
+示例：开启全量日志输出
+```bash
+LOG_ALL_PRINTS=1 ./deploy.sh
 ```
 - 修改调度（两种方式）：
   1) 直接编辑 `config/{env}.json` 并重启/重载服务（pm2 restart a-share-api）
@@ -80,6 +85,7 @@ server {
 - `GET /health`：健康检查
 - `GET /report?date=YYYY-MM-DD`：读取指定日期 JSON；若不存在返回 404，前端提示手动触发
 - `GET /report/raw?date=YYYY-MM-DD`：返回报告 JSON 原文（SSE/前端查看用）
+- `GET /report/debug?date=YYYY-MM-DD`：返回调试日志原文（DEBUG_MODE 开启时生成）
 - `GET /reports`：列出可用 JSON 文件名
 - `POST /run`：手动触发生成（可带 `{ "date": "2026-01-08" }`），生成完即返回内容
 - `GET /run/stream`：SSE 推送进度与结果（参数 `date=YYYY-MM-DD`）

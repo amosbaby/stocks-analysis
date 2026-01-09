@@ -74,7 +74,11 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
     margin = result.get("margin_trading", {}) or {}
     sentiment = result.get("sentiment", {}) or {}
     intermarket = result.get("intermarket", {}) or {}
+    index_snapshot = result.get("index_snapshot", {}) or {}
     heat_map = result.get("sector_heat_map")
+    run_mode = getattr(analyzer, "run_mode", None) if analyzer else None
+    conclusion_raw = result.get("conclusion_raw")
+    report_details = result.get("report_details", {})
 
     def to_number(value: Any) -> float:
         if value is None:
@@ -106,6 +110,48 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
         except Exception:
             pass
 
+    index_order = [
+        "上证指数",
+        "深证成指",
+        "沪深300",
+        "中证1000",
+        "创业板指",
+        "科创50",
+        "北证50",
+    ]
+    forecast_title_map = {
+        "LIVE_MORNING": "上午收盘推演",
+        "MIDDAY_SUMMARY": "下午走势推演",
+        "LIVE_AFTERNOON": "收盘走势推演",
+        "POST_MARKET": "明日走势推演",
+    }
+    indexes = []
+    for name in index_order:
+        data = index_snapshot.get(name)
+        if not data:
+            continue
+        indexes.append(
+            {
+                "name": name,
+                "close": to_number(data.get("close")),
+                "change": to_number(data.get("pct_chg")),
+            }
+        )
+    if not indexes:
+        indexes = [
+            {
+                "name": "上证指数",
+                "close": to_number(
+                    intermarket.get(
+                        "sh_index_close", liquidity.get("sh_index_close", 0)
+                    )
+                ),
+                "change": to_number(
+                    intermarket.get("sh_pct_chg", liquidity.get("sh_pct_chg", 0))
+                ),
+            }
+        ]
+
     # 兜底数据
     payload: Dict[str, Any] = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -121,6 +167,7 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
         "mainFlow": to_number(liquidity.get("main_net_inflow", 0)),
         "retailFlow": to_number(liquidity.get("retail_net_inflow", 0)),
         "winRate": to_number(sentiment.get("赚钱效应", 0)),
+        "indexes": indexes,
         "sectors": {
             "strong": strong_list,
             "weak": weak_list,
@@ -152,6 +199,10 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
             "优先减持高杠杆/破位品种，回避金融和游戏权重。",
             "配置部分货币/国债类资产锁定流动性。",
         ],
+        "runMode": run_mode,
+        "forecastTitle": forecast_title_map.get(run_mode, "明日走势推演"),
+        "conclusionRaw": conclusion_raw,
+        "reportDetails": report_details,
     }
     return payload
 
@@ -191,7 +242,8 @@ def generate_report(
         try:
             emit(40, "分析中", "加载行情与资金面数据")
             analyzer = AdvancedStockAnalyzer()
-            analyzer.run_analysis()
+            analyzer.run_analysis(include_conclusion=False)
+            analyzer.analyze_conclusion()
             emit(70, "整理结果", "生成风险指标与板块热力")
             payload = transform_analyzer_result(analyzer)
         except Exception as exc:  # pragma: no cover
@@ -271,6 +323,36 @@ def read_report_raw(date_str: Optional[str] = None) -> str:
     if not filepath.exists():
         raise FileNotFoundError(f"未找到 {filepath.name}")
     return filepath.read_text(encoding="utf-8")
+
+
+def read_debug_log(date_str: Optional[str] = None) -> str:
+    date_str = date_str or date.today().strftime("%Y-%m-%d")
+    filepath = BASE_DIR / "logs" / f"{date_str}.debug.log"
+    if not filepath.exists():
+        raise FileNotFoundError(f"未找到 {filepath.name}")
+    return filepath.read_text(encoding="utf-8")
+
+
+def generate_report_detail(mode: str) -> str:
+    def load_analyzer():
+        main_path = BASE_DIR / "main.py"
+        if not main_path.exists():
+            return None
+        spec = importlib.util.spec_from_file_location("a_share_main", main_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return getattr(module, "AdvancedStockAnalyzer", None)
+        return None
+
+    AdvancedStockAnalyzer = load_analyzer()
+    if AdvancedStockAnalyzer is None:
+        raise RuntimeError("分析器不可用")
+    analyzer = AdvancedStockAnalyzer()
+    analyzer.run_analysis(include_conclusion=False)
+    analyzer.run_mode = mode
+    analyzer.analyze_conclusion()
+    return analyzer.analysis_result.get("conclusion_raw", "")
 
 
 app = FastAPI(title="A-Share Risk Backend", version="1.0.0")
@@ -440,6 +522,38 @@ async def get_report_raw(
         raise HTTPException(
             status_code=404, detail="指定日期的报告不存在，请手动触发生成"
         )
+
+
+@app.get("/report/debug")
+@app.get("/api/report/debug")
+async def get_report_debug(
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+) -> Response:
+    if date:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date 格式必须为 YYYY-MM-DD")
+    try:
+        text = await asyncio.to_thread(read_debug_log, date)
+        return Response(content=text, media_type="text/plain")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="指定日期的调试日志不存在")
+
+
+@app.get("/report/detail")
+@app.get("/api/report/detail")
+async def get_report_detail(
+    mode: str = Query(..., description="报告类型"),
+) -> Dict[str, Any]:
+    allowed_modes = {"LIVE_MORNING", "MIDDAY_SUMMARY", "LIVE_AFTERNOON", "POST_MARKET"}
+    if mode not in allowed_modes:
+        raise HTTPException(status_code=400, detail="无效的报告类型")
+    try:
+        detail = await asyncio.to_thread(generate_report_detail, mode)
+        return {"mode": mode, "detail": detail}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/reports")
