@@ -16,6 +16,8 @@ const fallbackReport = {
   index: 4077.72,
   change: -0.2,
   volumeEstimate: "3.45",
+  volumeCurrent: "2.80",
+  volumeCurrentRaw: "28003.85亿元",
   leverageRate: 2.53,
   mainFlow: -633.24,
   retailFlow: 576.26,
@@ -110,6 +112,14 @@ const toNumber = (value) => {
 };
 
 const formatFlow = (value) => Math.abs(toNumber(value)).toFixed(2);
+const formatPercent = (value) => {
+  const num = toNumber(value);
+  return Number.isFinite(num) ? num.toFixed(2) : "--";
+};
+const formatTrillion = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num.toFixed(2) : "--";
+};
 const reportTitles = [
   {
     key: "LIVE_MORNING",
@@ -157,6 +167,24 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState({});
   const [detailError, setDetailError] = useState({});
   const showVolume = import.meta.env.VITE_SHOW_VOLUME !== "false";
+  const currentVolumeText =
+    report.volumeCurrentRaw || `${formatTrillion(report.volumeCurrent)}万亿`;
+  const riskAlertText = useMemo(() => {
+    const indexValue = toNumber(report.index);
+    const changeValue = toNumber(report.change);
+    if (!Number.isFinite(indexValue) || indexValue <= 0) {
+      return "高危警示：市场波动加剧";
+    }
+    let status = "承压";
+    if (changeValue <= -1) {
+      status = "承压严重";
+    } else if (changeValue >= 1) {
+      status = "高位震荡";
+    } else if (changeValue >= 0) {
+      status = "高位风险";
+    }
+    return `高危警示：${indexValue.toFixed(2)}点 ${status}`;
+  }, [report.index, report.change]);
 
   const headerIndexes =
     report.indexes && report.indexes.length
@@ -203,11 +231,11 @@ export default function App() {
           pointer: { itemStyle: { color: "#FFD60A" } },
           detail: {
             valueAnimation: true,
-            formatter: "{value}°C",
+            formatter: (value) => `${Number(value).toFixed(2)}%`,
             color: "#F9F6EE",
             fontSize: 28,
           },
-          data: [{ value: report.winRate || 0 }],
+          data: [{ value: toNumber(report.winRate) }],
         },
       ],
     }),
@@ -373,12 +401,18 @@ export default function App() {
     es.addEventListener("done", (evt) => {
       try {
         const data = JSON.parse(evt.data);
+        const durationMs = Number(data.durationMs);
+        const durationText = Number.isFinite(durationMs)
+          ? `耗时 ${(durationMs / 1000).toFixed(2)}s`
+          : "";
         setReport(data.data);
         setMessage("生成并加载完成");
         setProgress({
           percent: 100,
           title: "完成",
-          detail: "报告已生成并加载",
+          detail: durationText
+            ? `报告已生成并加载 (${durationText})`
+            : "报告已生成并加载",
         });
       } catch {
         setMessage("生成完成但解析失败");
@@ -521,10 +555,14 @@ export default function App() {
             {showVolume && (
               <div class="flex flex-col items-end">
                 <span class="text-[10px] uppercase text-zinc-500">
-                  预估成交
+                  当前成交
+                </span>
+                <span class="font-bold text-zinc-200">{currentVolumeText}</span>
+                <span class="mt-1 text-[10px] uppercase text-zinc-500">
+                  预估全天
                 </span>
                 <span class="font-bold text-zinc-200">
-                  {report.volumeEstimate}T
+                  {formatTrillion(report.volumeEstimate)}万亿
                 </span>
               </div>
             )}
@@ -765,21 +803,21 @@ export default function App() {
             <div class="grid grid-cols-2 gap-4">
               <MetricCard
                 label="市场杠杆率"
-                value={report.leverageRate}
+                value={formatPercent(report.leverageRate)}
                 unit="%"
                 status="danger"
                 subValue="融资买入惯性冲高"
               />
               <MetricCard
                 label="全天预估成交"
-                value={report.volumeEstimate}
+                value={formatTrillion(report.volumeEstimate)}
                 unit="万亿"
                 status="danger"
-                subValue="较5日均量放量17%"
+                subValue={`当前: ${currentVolumeText}`}
               />
               <MetricCard
                 label="赚钱效应"
-                value={report.winRate}
+                value={formatPercent(report.winRate)}
                 unit="%"
                 status="warning"
                 subValue="结构性分化严重"
@@ -997,7 +1035,7 @@ export default function App() {
 
       <div class="fixed bottom-6 right-6 z-[60]">
         <div class="flex cursor-pointer items-center gap-3 rounded-full bg-red-600 px-6 py-3 text-white shadow-2xl shadow-red-500/30 transition-transform hover:scale-105 hover:bg-red-700">
-          <span class="text-sm font-bold">高危警示：4077点 承压严重</span>
+          <span class="text-sm font-bold">{riskAlertText}</span>
         </div>
       </div>
     </div>

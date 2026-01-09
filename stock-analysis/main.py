@@ -554,7 +554,7 @@ class AdvancedStockAnalyzer:
             turnover_source = "指数日线"
             all_a_spot = self.data.get("all_a_spot")
             index_spot = self.data.get("index_spot")
-            if self.run_mode != "POST_MARKET" and all_a_spot is not None:
+            if all_a_spot is not None:
                 if not all_a_spot.empty and "成交额" in all_a_spot.columns:
                     spot_turnover = (
                         pd.to_numeric(all_a_spot["成交额"], errors="coerce")
@@ -564,12 +564,8 @@ class AdvancedStockAnalyzer:
                     )
                     if spot_turnover > 0:
                         total_turnover = spot_turnover
-                        turnover_source = "实时汇总"
-            if (
-                self.run_mode != "POST_MARKET"
-                and turnover_source == "指数日线"
-                and index_spot is not None
-            ):
+                        turnover_source = "全A汇总"
+            if turnover_source == "指数日线" and index_spot is not None:
                 amount_col = _pick_col(index_spot, ["成交额", "成交金额", "成交额(元)"])
                 if not index_spot.empty and amount_col:
                     idx_turnover = (
@@ -617,6 +613,7 @@ class AdvancedStockAnalyzer:
             ) / 1e8
 
             volume_analysis_turnover = total_turnover
+            estimated_turnover = None
             estimated_turnover_str = ""
             volume_desc_prefix = ""
 
@@ -669,6 +666,7 @@ class AdvancedStockAnalyzer:
 
             liquidity_payload = {
                 "total_volume": f"{total_turnover:.2f}亿元",
+                "estimated_turnover": estimated_turnover,
                 "estimated_turnover_str": estimated_turnover_str,
                 "volume_level": volume_level,
                 "volume_change_desc": volume_change_desc,

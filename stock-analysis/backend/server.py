@@ -87,12 +87,41 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
         if isinstance(value, (int, float)):
             return float(value)
         if isinstance(value, str):
-            cleaned = value.replace(",", "").replace("亿元", "").replace("亿", "")
+            cleaned = (
+                value.replace(",", "")
+                .replace("亿元", "")
+                .replace("亿", "")
+                .replace("%", "")
+                .replace("％", "")
+            )
             try:
                 return float(cleaned)
             except ValueError:
                 return 0.0
         return 0.0
+
+    def to_trillion_from_turnover(value: Any) -> float:
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            # Legacy numeric values are treated as "亿元".
+            return float(value) / 10000
+        if isinstance(value, str):
+            cleaned = value.replace(",", "")
+            if "万亿" in cleaned:
+                try:
+                    return float(cleaned.replace("万亿", "").strip())
+                except ValueError:
+                    return 0.0
+            if "亿" in cleaned:
+                try:
+                    return (
+                        float(cleaned.replace("亿元", "").replace("亿", "").strip())
+                        / 10000
+                    )
+                except ValueError:
+                    return 0.0
+        return to_number(value)
 
     strong_list: List[Dict[str, Any]] = []
     weak_list: List[Dict[str, Any]] = []
@@ -162,8 +191,18 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
         "change": to_number(
             intermarket.get("sh_pct_chg", liquidity.get("sh_pct_chg", 0))
         ),
-        "volumeEstimate": to_number(liquidity.get("total_volume", "0")),
-        "volumeEstimateRaw": liquidity.get("total_volume", "0"),
+        "volumeEstimate": to_trillion_from_turnover(
+            liquidity.get("estimated_turnover")
+            if liquidity.get("estimated_turnover")
+            else liquidity.get("total_volume", "0")
+        ),
+        "volumeEstimateRaw": (
+            f"{liquidity.get('estimated_turnover'):.2f}亿元"
+            if liquidity.get("estimated_turnover")
+            else liquidity.get("total_volume", "0")
+        ),
+        "volumeCurrent": to_trillion_from_turnover(liquidity.get("total_volume", "0")),
+        "volumeCurrentRaw": liquidity.get("total_volume", "0"),
         "leverageRate": to_number(margin.get("leverage_ratio", 0)),
         "mainFlow": to_number(liquidity.get("main_net_inflow", 0)),
         "retailFlow": to_number(liquidity.get("retail_net_inflow", 0)),
@@ -245,6 +284,7 @@ def generate_report(
             analyzer = AdvancedStockAnalyzer()
             analyzer.run_analysis(include_conclusion=False)
             analyzer.analyze_conclusion()
+            analyzer.print_report()
             emit(70, "整理结果", "生成风险指标与板块热力")
             payload = transform_analyzer_result(analyzer)
         except Exception as exc:  # pragma: no cover
@@ -468,16 +508,22 @@ async def run_stream(
         emit("progress", payload)
 
     def worker() -> None:
+        start_time = datetime.now()
         try:
             payload = generate_report(date_str, progress_cb=progress_cb)
             if isinstance(payload, dict) and payload.get("error"):
                 emit("failed", {"detail": payload.get("error")})
             else:
+                elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                print(
+                    f"[run/stream] {date_str or date.today().strftime('%Y-%m-%d')} finished in {elapsed_ms}ms"
+                )
                 emit(
                     "done",
                     {
                         "date": date_str or date.today().strftime("%Y-%m-%d"),
                         "data": payload,
+                        "durationMs": elapsed_ms,
                     },
                 )
         except Exception as exc:  # pragma: no cover
