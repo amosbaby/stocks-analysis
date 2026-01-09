@@ -60,10 +60,10 @@ VITE_API_BASE_URL=https://api.example.com ./deploy.sh
 将 `dist/` 作为 Nginx 静态目录。示例 Nginx 配置（`/etc/nginx/conf.d/a-share.conf`）：
 ```
 server {
-    listen 80;
-    server_name your.domain.com;
+    listen 3009;
+    server_name localhost;
 
-    root /opt/a-share/stock-analysis/preact-terminal/dist;
+    root /usr/share/nginx/html/stock-analysis;
     index index.html;
 
     location /api/ {
@@ -78,6 +78,7 @@ server {
     }
 }
 ```
+本地开发建议使用 Vite 代理：`http://localhost:3009/api/` -> `http://localhost:3008/api/`。
 重载：`sudo nginx -t && sudo nginx -s reload`
 
 ## 配置与调度
