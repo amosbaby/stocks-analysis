@@ -18,7 +18,16 @@ const fallbackReport = {
   volumeEstimate: "3.45",
   volumeCurrent: "2.80",
   volumeCurrentRaw: "28003.85亿元",
+  volumeLevel: "高于5日均量",
+  volumeQualitativeLevel: "天量水平",
+  marketStage: {
+    stage_description:
+      "当前市场处于【震荡整固】阶段，多空双方力量均衡，等待方向选择。",
+    risk_type: "趋势不明朗，主要为技术性波动风险。",
+  },
   leverageRate: 2.53,
+  marginTurnoverRatio: 10.4,
+  marginTurnoverLevel: "健康",
   mainFlow: -633.24,
   retailFlow: 576.26,
   winRate: 40.9,
@@ -120,6 +129,26 @@ const formatTrillion = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : "--";
 };
+const parseAiInsight = (raw) => {
+  if (!raw || typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return "";
+  try {
+    const parsed = JSON.parse(trimmed);
+    const core = parsed["核心矛盾解读"];
+    if (core && typeof core === "object") {
+      const preferred = core["多空博弈"] || core["量价背离"];
+      if (typeof preferred === "string" && preferred) return preferred;
+      const first = Object.values(core).find(
+        (value) => typeof value === "string",
+      );
+      if (typeof first === "string") return first;
+    }
+  } catch {
+    return "";
+  }
+  return "";
+};
 const reportTitles = [
   {
     key: "LIVE_MORNING",
@@ -169,6 +198,42 @@ export default function App() {
   const showVolume = import.meta.env.VITE_SHOW_VOLUME !== "false";
   const currentVolumeText =
     report.volumeCurrentRaw || `${formatTrillion(report.volumeCurrent)}万亿`;
+  const marketStage = report.marketStage || {};
+  const volumeLabel = report.volumeQualitativeLevel || report.volumeLevel;
+  const leverageText = `${formatPercent(report.leverageRate)}%`;
+  const leverageValue = toNumber(report.leverageRate);
+  const leverageNote =
+    leverageValue >= 4.5
+      ? "已接近或超过危险期"
+      : leverageValue >= 4
+        ? "进入高度危险区"
+        : leverageValue >= 3
+          ? "市场情绪过热，杠杆压力开始积聚"
+          : leverageValue >= 2
+            ? "处于正常活跃区间"
+            : "偏低，杠杆活跃度有限";
+  const marginTurnoverValue = toNumber(report.marginTurnoverRatio);
+  const marginTurnoverNote =
+    marginTurnoverValue > 12
+      ? "两融活跃度偏高"
+      : marginTurnoverValue >= 8
+        ? "两融活跃度健康"
+        : "两融活跃度偏低";
+  const marginTurnoverStatus =
+    marginTurnoverValue > 12
+      ? "danger"
+      : marginTurnoverValue >= 8
+        ? "success"
+        : "neutral";
+  const alertTitle = `顶级预警：${volumeLabel || "高风险"} / ${
+    marketStage.risk_type || "趋势承压"
+  }`;
+  const alertSummary = marketStage.stage_description
+    ? `当前市场处于${marketStage.stage_description}`
+    : "当前市场处于高波动阶段，主力资金离场意愿增强。";
+  const alertAdvice = Array.isArray(report.aiAdvice) ? report.aiAdvice : [];
+  const coreDirective = alertAdvice[0] || "核心指令：仓位立即降至 50% 以下";
+  const keyDefense = alertAdvice[1] || "关键防御：回避金融、游戏权重";
   const riskAlertText = useMemo(() => {
     const indexValue = toNumber(report.index);
     const changeValue = toNumber(report.change);
@@ -185,6 +250,10 @@ export default function App() {
     }
     return `高危警示：${indexValue.toFixed(2)}点 ${status}`;
   }, [report.index, report.change]);
+  const aiFlowInsight = useMemo(
+    () => parseAiInsight(report.conclusionRaw),
+    [report.conclusionRaw],
+  );
 
   const headerIndexes =
     report.indexes && report.indexes.length
@@ -554,16 +623,22 @@ export default function App() {
             </div>
             {showVolume && (
               <div class="flex flex-col items-end">
-                <span class="text-[10px] uppercase text-zinc-500">
-                  当前成交
-                </span>
-                <span class="font-bold text-zinc-200">{currentVolumeText}</span>
-                <span class="mt-1 text-[10px] uppercase text-zinc-500">
-                  预估全天
-                </span>
-                <span class="font-bold text-zinc-200">
-                  {formatTrillion(report.volumeEstimate)}万亿
-                </span>
+                <div class="flex items-baseline gap-2">
+                  <span class="text-[10px] uppercase text-zinc-500">
+                    当前成交
+                  </span>
+                  <span class="text-base font-bold text-zinc-200">
+                    {currentVolumeText}
+                  </span>
+                </div>
+                <div class="mt-1 flex items-baseline gap-2">
+                  <span class="text-[10px] uppercase text-zinc-500">
+                    预估全天
+                  </span>
+                  <span class="text-base font-bold text-zinc-200">
+                    {formatTrillion(report.volumeEstimate)}万亿
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -606,20 +681,23 @@ export default function App() {
               </svg>
             </div>
             <div class="flex-1">
-              <h2 class="mb-2 text-2xl font-bold text-red-500">
-                顶级预警：天量滞涨 / 趋势末期
-              </h2>
+              <h2 class="mb-2 text-2xl font-bold text-red-500">{alertTitle}</h2>
               <p class="mb-4 max-w-4xl text-sm leading-relaxed text-zinc-300">
-                当前市场处于上涨趋势末期的巨量换手阶段，主力资金离场意愿极其强烈。杠杆率已达
-                <span class="font-bold text-red-500"> 2.53%</span>{" "}
-                风险阈值，散户大量承接主力抛单，市场脆弱性剧增。
+                {alertSummary}。杠杆率为
+                <span class="font-bold text-red-500"> {leverageText}</span> ，
+                {leverageNote}。两融交易额占成交额约
+                <span class="font-bold text-red-500">
+                  {" "}
+                  {formatPercent(marginTurnoverValue)}%
+                </span>
+                ，{marginTurnoverNote}，散户大量承接主力抛单，市场脆弱性剧增。
               </p>
               <div class="flex flex-wrap gap-4">
                 <div class="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-red-900/20">
-                  核心指令：仓位立即降至 50% 以下
+                  {coreDirective}
                 </div>
                 <div class="rounded-md border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-semibold text-zinc-300">
-                  关键防御：回避金融、游戏权重
+                  {keyDefense}
                 </div>
               </div>
             </div>
@@ -809,6 +887,13 @@ export default function App() {
                 subValue="融资买入惯性冲高"
               />
               <MetricCard
+                label="两融占比"
+                value={formatPercent(report.marginTurnoverRatio)}
+                unit="%"
+                status={marginTurnoverStatus}
+                subValue={marginTurnoverNote}
+              />
+              <MetricCard
                 label="全天预估成交"
                 value={formatTrillion(report.volumeEstimate)}
                 unit="万亿"
@@ -840,9 +925,12 @@ export default function App() {
               </div>
               <div class="h-[200px] w-full" ref={flowRef}></div>
               <p class="mt-4 rounded bg-zinc-950 p-3 text-[11px] italic leading-relaxed text-zinc-500">
-                主力流出 {formatFlow(report.mainFlow)} 亿，散户逆势买入{" "}
-                {formatFlow(report.retailFlow)}{" "}
-                亿。典型的牛末换手特征，主导力量正在从专业机构向非理性散户转换。
+                {toNumber(report.mainFlow) < 0 ? "主力流出" : "主力流入"}{" "}
+                {formatFlow(report.mainFlow)} 亿，散户{" "}
+                {toNumber(report.retailFlow) < 0 ? "流出" : "买入"}{" "}
+                {formatFlow(report.retailFlow)} 亿。
+                {aiFlowInsight ||
+                  "典型的牛末换手特征，主导力量正在从专业机构向非理性散户转换。"}
               </p>
             </div>
           </div>

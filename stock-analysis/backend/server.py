@@ -203,7 +203,12 @@ def transform_analyzer_result(analyzer: Any) -> Dict[str, Any]:
         ),
         "volumeCurrent": to_trillion_from_turnover(liquidity.get("total_volume", "0")),
         "volumeCurrentRaw": liquidity.get("total_volume", "0"),
+        "volumeLevel": liquidity.get("volume_level"),
+        "volumeQualitativeLevel": liquidity.get("volume_qualitative_level"),
+        "marketStage": result.get("market_stage", {}),
         "leverageRate": to_number(margin.get("leverage_ratio", 0)),
+        "marginTurnoverRatio": to_number(margin.get("margin_turnover_ratio", 0)),
+        "marginTurnoverLevel": margin.get("margin_turnover_level"),
         "mainFlow": to_number(liquidity.get("main_net_inflow", 0)),
         "retailFlow": to_number(liquidity.get("retail_net_inflow", 0)),
         "winRate": to_number(sentiment.get("赚钱效应", 0)),
@@ -281,7 +286,7 @@ def generate_report(
     if AdvancedStockAnalyzer is not None:
         try:
             emit(40, "分析中", "加载行情与资金面数据")
-            analyzer = AdvancedStockAnalyzer()
+            analyzer = AdvancedStockAnalyzer(report_date=date_str)
             analyzer.run_analysis(include_conclusion=False)
             analyzer.analyze_conclusion()
             analyzer.print_report()

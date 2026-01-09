@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import akshare as ak
 import numpy as np
@@ -257,15 +258,17 @@ class AdvancedStockAnalyzer:
         "交通运输",
         "传媒/游戏",
         "军工",
+        "白酒",
         "其他",
     ]
 
-    def __init__(self):
+    def __init__(self, report_date: Optional[str] = None):
         self.data = {}
         self.analysis_result = {}
         self.stock_to_industry_map = {}
         self.run_mode = None
         self.is_trading_day = None
+        self.report_date = report_date
 
     def _build_stock_industry_map(self):
         """构建股票代码到行业名称的精确映射字典"""
@@ -441,13 +444,37 @@ class AdvancedStockAnalyzer:
             )
 
             print("步骤 8/13: 获取涨跌停与炸板数据...")
+            if self.report_date:
+                zt_date_str = self.report_date.replace("-", "")
+            else:
+                zt_date_str = datetime.now().strftime("%Y%m%d")
+                trade_day_flag = self._is_trade_day(datetime.now().date())
+                if trade_day_flag is False:
+                    calendar_df = self._get_trade_calendar()
+                    if calendar_df is not None and not calendar_df.empty:
+                        date_col = _pick_col(
+                            calendar_df, ["trade_date", "日期", "date"]
+                        )
+                        if date_col:
+                            date_series = pd.to_datetime(
+                                calendar_df[date_col], errors="coerce"
+                            ).dt.date
+                            valid_dates = date_series[
+                                date_series <= datetime.now().date()
+                            ]
+                            if not valid_dates.empty:
+                                latest_trade_date = valid_dates.max()
+                                zt_date_str = latest_trade_date.strftime("%Y%m%d")
 
             def fetch_zt_pool():
-                return _safe_ak_call(["stock_zt_pool_em", "stock_zt_pool"])
+                return _safe_ak_call(
+                    ["stock_zt_pool_em", "stock_zt_pool"], date=zt_date_str
+                )
 
             def fetch_dt_pool():
                 return _safe_ak_call(
-                    ["stock_dt_pool_em", "stock_zt_pool_dt_em", "stock_zt_pool_dt"]
+                    ["stock_dt_pool_em", "stock_zt_pool_dt_em", "stock_zt_pool_dt"],
+                    date=zt_date_str,
                 )
 
             def fetch_zb_pool():
@@ -456,12 +483,14 @@ class AdvancedStockAnalyzer:
                         "stock_zt_pool_zb_em",
                         "stock_zt_pool_zdt_em",
                         "stock_zt_pool_zd_em",
-                    ]
+                    ],
+                    date=zt_date_str,
                 )
 
             def fetch_zt_strong_pool():
                 return _safe_ak_call(
-                    ["stock_zt_pool_strong_em", "stock_zt_pool_strong"]
+                    ["stock_zt_pool_strong_em", "stock_zt_pool_strong"],
+                    date=zt_date_str,
                 )
 
             self.data["zt_pool"] = cache_data(
@@ -725,6 +754,7 @@ class AdvancedStockAnalyzer:
             sh_margin = self.data.get("sh_margin")
             sz_margin = self.data.get("sz_margin")
             all_a_spot = self.data.get("all_a_spot")
+            liquidity = self.analysis_result.get("liquidity", {})
             if (
                 sh_margin is None
                 or sh_margin.empty
@@ -761,6 +791,33 @@ class AdvancedStockAnalyzer:
                 else 0
             )
 
+            total_turnover = None
+            if liquidity and liquidity.get("total_volume"):
+                try:
+                    total_turnover = float(
+                        str(liquidity.get("total_volume", "0"))
+                        .replace(",", "")
+                        .replace("亿元", "")
+                        .replace("亿", "")
+                    )
+                except ValueError:
+                    total_turnover = None
+            total_turnover_yuan = total_turnover * 1e8 if total_turnover else 0
+            total_finance_buy = (
+                sh_margin.iloc[-1]["融资买入额"] + sz_margin.iloc[-1]["融资买入额"]
+            )
+            margin_turnover_ratio = (
+                (total_finance_buy / total_turnover_yuan) * 100
+                if total_turnover_yuan > 0
+                else 0
+            )
+            if margin_turnover_ratio > 12:
+                margin_turnover_level = "警惕"
+            elif margin_turnover_ratio >= 8:
+                margin_turnover_level = "健康"
+            else:
+                margin_turnover_level = "偏低"
+
             # 对杠杆率进行定性描述
             if leverage_ratio < 1.8:
                 leverage_level = "较低"
@@ -776,6 +833,9 @@ class AdvancedStockAnalyzer:
                 "change_desc": change_desc,
                 "leverage_ratio": f"{leverage_ratio:.2f}%",
                 "leverage_level": leverage_level,
+                "total_finance_buy": f"{total_finance_buy / 1e8:.2f}亿元",
+                "margin_turnover_ratio": f"{margin_turnover_ratio:.2f}%",
+                "margin_turnover_level": margin_turnover_level,
             }
         except Exception as e:
             print(f"  - 市场杠杆率分析失败: {e}")
