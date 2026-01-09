@@ -23,9 +23,15 @@ npm install
 - `VITE_API_BASE_URL=...`：注入前端 API 基地址
 - `APP_ENV=prod`：选择配置文件（默认 `dev`）
 - `LOG_ALL_PRINTS=1`：将 print 输出写入 `logs/YYYY-MM-DD.debug.log`
+- `DEPLOY_NGINX=0`：服务器部署时跳过复制前端构建产物到 Nginx
+- `NGINX_ROOT_DIR=...`：前端构建产物目标目录（默认 `/usr/share/nginx/html/stock-analysis`）
 如需强制重装依赖，可删除 `.deploy-cache/` 与对应的 `.venv/` 或 `preact-terminal/node_modules/`。
 pm2 启动参数不会随 `restart --update-env` 变化；脚本会记录上次端口到 `.deploy-cache/pm2.port`，端口变更时自动重建进程。
 如需清理端口记录：删除 `.deploy-cache/pm2.port` 后重新运行 `./deploy.sh`。
+
+## 快速使用
+- 开发环境（默认）：`./deploy.sh`
+- 线上环境：`./deploy.sh prod`
 
 ## 后端运行（pm2 管理）
 假设代码路径 `/opt/a-share/stock-analysis`，监听 3008 端口：

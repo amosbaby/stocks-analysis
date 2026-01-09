@@ -6,17 +6,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT"
 FRONT_DIR="$ROOT/preact-terminal"
+FRONT_DIST_DIR="$FRONT_DIR/dist"
+NGINX_ROOT_DIR="${NGINX_ROOT_DIR:-/usr/share/nginx/html/stock-analysis}"
+DEPLOY_NGINX="${DEPLOY_NGINX:-1}"
 VENV_DIR="$ROOT/.venv"
 CACHE_DIR="$ROOT/.deploy-cache"
-APP_ENV="${APP_ENV:-prod}"
+APP_ENV="${APP_ENV:-dev}"
 LOG_ALL_PRINTS="${LOG_ALL_PRINTS:-0}"
 PORT="${PORT:-3008}"
 PM2_NAME="${PM2_NAME:-a-share-api}"
-TARGET_ENV="${TARGET_ENV:-server}"
+TARGET_ENV="${TARGET_ENV:-local}"
 LOCAL_PYTHON_BIN="${LOCAL_PYTHON_BIN:-python3.13}"
 SERVER_PYTHON_BIN="${SERVER_PYTHON_BIN:-/usr/local/python3.10/bin/python3.10}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 SKIP_FRONTEND_BUILD="${SKIP_FRONTEND_BUILD:-0}"
+
+if [[ "${1:-}" == "prod" ]]; then
+  TARGET_ENV="server"
+  APP_ENV="prod"
+fi
 
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ "$TARGET_ENV" == "local" ]]; then
@@ -121,6 +129,16 @@ if [[ "$SKIP_FRONTEND_BUILD" != "1" ]]; then
     export VITE_API_BASE_URL
   fi
   npm run build
+  if [[ "$TARGET_ENV" == "server" && "$DEPLOY_NGINX" == "1" ]]; then
+    if [[ ! -d "$FRONT_DIST_DIR" ]]; then
+      echo ">>> 前端构建输出不存在: $FRONT_DIST_DIR" >&2
+      exit 1
+    fi
+    echo ">>> 部署前端到 Nginx: ${NGINX_ROOT_DIR}"
+    mkdir -p "$NGINX_ROOT_DIR"
+    rm -rf "${NGINX_ROOT_DIR:?}/"*
+    cp -R "$FRONT_DIST_DIR/." "$NGINX_ROOT_DIR/"
+  fi
   cd "$BACKEND_DIR"
 else
   echo ">>> 跳过前端构建 (SKIP_FRONTEND_BUILD=1)"
